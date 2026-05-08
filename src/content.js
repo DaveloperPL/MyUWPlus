@@ -1,64 +1,72 @@
-"use strict"
+// Function to inject GPA badge into the course element
+function injectGPABadge(courseElement, gpaValue) {
+  if (courseElement.querySelector('.madgrades-gpa-badge')) return;
 
-const blurFilter = "blur(6px)"
-let textToBlur = ""
+  const nameElement = courseElement.querySelector('.name');
 
-// Search this DOM node for text to blur and blur the parent element if found.
-function processNode(node) {
-    if (node.childNodes.length > 0) {
-        Array.from(node.childNodes).forEach(processNode)
-    }
-    if (node.nodeType === Node.TEXT_NODE &&
-        node.textContent !== null && node.textContent.trim().length > 0) {
-        const parent = node.parentElement
-        if (parent !== null &&
-            (parent.tagName === 'SCRIPT' || parent.style.filter === blurFilter)) {
-            // Already blurred
-            return
-        }
-        if (node.textContent.includes(textToBlur)) {
-            blurElement(parent)
-        }
-    }
+  if (!nameElement) return;
+
+  const badge = document.createElement('span');
+  badge.className = 'madgrades-gpa-badge';
+  
+  // Style based on GPA "Difficulty"
+  const val = parseFloat(gpaValue);
+  let color = "#666"; 
+  if (val >= 3.5) color = "#28a745"; // Green
+  else if (val >= 3.0) color = "#d4a017"; // Gold
+  else if (val < 3.0) color = "#c5050c"; // UW Red
+
+  badge.innerText = ` GPA: ${gpaValue}`;
+  badge.style.cssText = `
+    display: inline-block;
+    margin-left: 10px;
+    padding: 2px 6px;
+    border-radius: 4px;
+    background-color: ${color}22;
+    color: ${color};
+    font-weight: bold;
+    font-size: 0.85em;
+    border: 1px solid ${color};
+  `;
+
+  nameElement.appendChild(badge);
 }
 
-function blurElement(elem) {
-    elem.style.filter = blurFilter
-    console.debug("blurred id:" + elem.id + " class:" + elem.className +
-        " tag:" + elem.tagName + " text:" + elem.textContent)
-}
+// Main function to process the enrollment page and find courses
+const processEnrollmentPage = () => {
+  const courses = document.querySelectorAll('li.course-item:not(.gpa-scanned)');
 
-// Create a MutationObserver to watch for changes to the DOM.
-const observer = new MutationObserver((mutations) => {
-    mutations.forEach((mutation) => {
-        if (mutation.addedNodes.length > 0) {
-            mutation.addedNodes.forEach(processNode)
-        } else {
-            processNode(mutation.target)
-        }
-    })
-})
+  courses.forEach(course => {
+    course.classList.add('gpa-scanned');
+    
+    const nameSpan = course.querySelector('.name');
+    if (!nameSpan) return;
 
-// Enable the content script by default.
-let enabled = true
-const keys = ["enabled", "item"]
+    const cleanCourseName = nameSpan.textContent.replace(/\s+/g, ' ').trim();
+    
+    console.log(`[Content] Found course: "${cleanCourseName}". Requesting GPA...`);
+    chrome.runtime.sendMessage({ 
+  type: "FETCH_GPA", 
+  courseName: cleanCourseName 
+}, (response) => {
+    // Response should be in the format: { gpa: "3.75" } or { gpa: "N/A" }
+  if (response && response.gpa && response.gpa.gpa) {
+    injectGPABadge(course, response.gpa.gpa); 
+  } else {
+    injectGPABadge(course, "N/A");
+  }
+});
+  });
+};
 
-chrome.storage.sync.get(keys, (data) => {
-    if (data.enabled === false) {
-        enabled = false
-    }
-    if (data.item) {
-        textToBlur = data.item
-    }
-    // Only start observing the DOM if the extension is enabled and there is text to blur.
-    if (enabled && textToBlur.trim().length > 0) {
-        observer.observe(document, {
-            attributes: false,
-            characterData: true,
-            childList: true,
-            subtree: true,
-        })
-        // Loop through all elements on the page for initial processing.
-        processNode(document)
-    }
-})
+// Use MutationObserver because the Degree Planner is an Angular app and dynamically updates the DOM without page reloads. This ensures we catch new courses added to the list.
+const observer = new MutationObserver(() => {
+  processEnrollmentPage();
+});
+
+observer.observe(document.body, { 
+  childList: true, 
+  subtree: true 
+});
+
+processEnrollmentPage();
